@@ -5,13 +5,14 @@
 package main
 
 import (
-	"golang.org/x/oauth2"
-	"github.com/digitalocean/godo"
-	"github.com/digitalocean/godo/context"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/http"
-	"fmt"
+
+	"github.com/digitalocean/godo"
+	"golang.org/x/oauth2"
 )
 
 const (
@@ -20,13 +21,13 @@ const (
 )
 
 type MyIp struct {
-    Ip string `json:"ip"`
-    Hostname string `json:""`
-    City string `json:""`
-    Region string `json:""`
-    Country string `json:""`
-    Loc string `json:""`
-    Org string `json:""`
+	Ip       string `json:"ip"`
+	Hostname string `json:""`
+	City     string `json:""`
+	Region   string `json:""`
+	Country  string `json:""`
+	Loc      string `json:""`
+	Org      string `json:""`
 }
 
 type TokenSource struct {
@@ -41,20 +42,20 @@ func (t *TokenSource) Token() (*oauth2.Token, error) {
 
 func main() {
 	tokenSource := &TokenSource{AccessToken: accessToken}
-        changeDnsIp(tokenSource, domain)
+	changeDnsIp(tokenSource, domain)
 }
 
 func getOwnIp() string {
 	resp, err := http.Get("http://ipinfo.io/json")
 	if err != nil {
-	    fmt.Printf(err.Error())
+		fmt.Printf(err.Error())
 	}
 	defer resp.Body.Close()
 	data, _ := ioutil.ReadAll(resp.Body)
 	response := MyIp{}
 	err = json.Unmarshal(data, &response)
 	if err != nil {
-	    fmt.Printf(err.Error())
+		fmt.Printf(err.Error())
 	}
 	return response.Ip
 }
@@ -63,8 +64,13 @@ func changeDnsIp(accessToken *TokenSource, domainName string) {
 	oauth_client := oauth2.NewClient(context.Background(), accessToken)
 	client := godo.NewClient(oauth_client)
 	listOps := godo.ListOptions{Page: 1, PerPage: 50}
+	var err error = nil
 
-	records, _, _ := client.Domains.Records(context.Background(), domainName, &listOps)
+	records, _, err := client.Domains.Records(context.Background(), domainName, &listOps)
+	if err != nil {
+		fmt.Println("Error getting records")
+		fmt.Println(err.Error())
+	}
 	var ipRecord = godo.DomainRecord{}
 	for _, r := range records {
 		if r.Type == "A" {
@@ -74,8 +80,8 @@ func changeDnsIp(accessToken *TokenSource, domainName string) {
 
 	editRequest := godo.DomainRecordEditRequest{Data: getOwnIp()}
 	fmt.Printf("Updating record %v to new ip: %v\n", domainName, editRequest.Data)
-	_, _, err := client.Domains.EditRecord(context.Background(), domainName, ipRecord.ID, &editRequest)
+	_, _, err = client.Domains.EditRecord(context.Background(), domainName, ipRecord.ID, &editRequest)
 	if err != nil {
-		fmt.Errorf(err.Error())
+		fmt.Printf(err.Error())
 	}
 }
