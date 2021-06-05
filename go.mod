@@ -1,4 +1,4 @@
-module gist.github.com/mangeld/f095055f2672dbf4d1f1
+module github.com/mangeld/dnschanger
 
 go 1.16
 
