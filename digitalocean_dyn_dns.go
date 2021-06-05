@@ -7,11 +7,13 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/digitalocean/godo"
+	"github.com/getsentry/sentry-go"
 	"golang.org/x/oauth2"
 )
 
@@ -36,31 +38,42 @@ type TokenSource struct {
 
 func (t *TokenSource) Token() (*oauth2.Token, error) {
 	token := &oauth2.Token{AccessToken: t.AccessToken}
-	fmt.Printf("Using token: %v... for domain: %v\n", accessToken[:5], domain)
+	log.Default().Printf("Using token: %v... for domain: %v\n", accessToken[:5], domain)
 	return token, nil
 }
 
 func main() {
 	tokenSource := &TokenSource{AccessToken: accessToken}
-	changeDnsIp(tokenSource, domain)
+	err := sentry.Init(sentry.ClientOptions{
+		Dsn: "",
+	})
+	defer sentry.Flush(2 * time.Second)
+	if err != nil {
+		log.Fatalf("Error initialising sentry: %s", err)
+	}
+	err = changeDnsIp(tokenSource, domain)
+	if err != nil {
+		sentry.CaptureException(err)
+		log.Fatalf("Error: %s", err)
+	}
 }
 
-func getOwnIp() string {
+func getOwnIp() (string, error) {
 	resp, err := http.Get("http://ipinfo.io/json")
 	if err != nil {
-		fmt.Printf(err.Error())
+		return "", err
 	}
 	defer resp.Body.Close()
 	data, _ := ioutil.ReadAll(resp.Body)
 	response := MyIp{}
 	err = json.Unmarshal(data, &response)
 	if err != nil {
-		fmt.Printf(err.Error())
+		return "", err
 	}
-	return response.Ip
+	return response.Ip, nil
 }
 
-func changeDnsIp(accessToken *TokenSource, domainName string) {
+func changeDnsIp(accessToken *TokenSource, domainName string) error {
 	oauth_client := oauth2.NewClient(context.Background(), accessToken)
 	client := godo.NewClient(oauth_client)
 	listOps := godo.ListOptions{Page: 1, PerPage: 50}
@@ -68,8 +81,7 @@ func changeDnsIp(accessToken *TokenSource, domainName string) {
 
 	records, _, err := client.Domains.Records(context.Background(), domainName, &listOps)
 	if err != nil {
-		fmt.Println("Error getting records")
-		fmt.Println(err.Error())
+		return err
 	}
 	var ipRecord = godo.DomainRecord{}
 	for _, r := range records {
@@ -78,10 +90,16 @@ func changeDnsIp(accessToken *TokenSource, domainName string) {
 		}
 	}
 
-	editRequest := godo.DomainRecordEditRequest{Data: getOwnIp()}
-	fmt.Printf("Updating record %v to new ip: %v\n", domainName, editRequest.Data)
+	ownIp, err := getOwnIp()
+	if err != nil {
+		return err
+	}
+
+	editRequest := godo.DomainRecordEditRequest{Data: ownIp}
+	log.Printf("Updating record %v to new ip: %v\n", domainName, editRequest.Data)
 	_, _, err = client.Domains.EditRecord(context.Background(), domainName, ipRecord.ID, &editRequest)
 	if err != nil {
-		fmt.Printf(err.Error())
+		return err
 	}
+	return nil
 }
