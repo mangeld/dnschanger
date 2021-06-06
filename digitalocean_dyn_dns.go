@@ -10,16 +10,12 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/digitalocean/godo"
 	"github.com/getsentry/sentry-go"
 	"golang.org/x/oauth2"
-)
-
-const (
-	accessToken = "your token"
-	domain      = "your domain"
 )
 
 type MyIp struct {
@@ -38,23 +34,49 @@ type TokenSource struct {
 
 func (t *TokenSource) Token() (*oauth2.Token, error) {
 	token := &oauth2.Token{AccessToken: t.AccessToken}
-	log.Default().Printf("Using token: %v... for domain: %v\n", accessToken[:5], domain)
 	return token, nil
 }
 
-func main() {
-	tokenSource := &TokenSource{AccessToken: accessToken}
-	err := sentry.Init(sentry.ClientOptions{
-		Dsn: "",
-	})
-	defer sentry.Flush(2 * time.Second)
+func initSentry(options sentry.ClientOptions, wrapped func() error) {
+	err := sentry.Init(options)
 	if err != nil {
 		log.Fatalf("Error initialising sentry: %s", err)
 	}
-	err = changeDnsIp(tokenSource, domain)
+	defer sentry.Flush(2 * time.Second)
+	defer sentry.Recover()
+
+	err = wrapped()
 	if err != nil {
 		sentry.CaptureException(err)
-		log.Fatalf("Error: %s", err)
+	}
+}
+
+func requireEnv(name string) string {
+	value, present := os.LookupEnv(name)
+	if !present {
+		log.Fatalf("Please provide %s as an env variable", name)
+	}
+	return value
+}
+
+func main() {
+	// Get accessToken and domain from env
+	accessToken := requireEnv("DIGITALOCEAN_ACCESS_TOKEN")
+	domain := requireEnv("DOMAIN")
+	tokenSource := &TokenSource{AccessToken: accessToken}
+	sentryDSN, sentryEnabled := os.LookupEnv("SENTRY_DSN")
+	if sentryEnabled {
+		log.Print("Sentry DSN provided, initializing...")
+		initSentry(
+			sentry.ClientOptions{Dsn: sentryDSN},
+			func() error {
+				return changeDnsIp(tokenSource, domain)
+			},
+		)
+	} else {
+		if err := changeDnsIp(tokenSource, domain); err != nil {
+			log.Fatal(err)
+		}
 	}
 }
 
