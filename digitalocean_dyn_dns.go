@@ -122,9 +122,13 @@ func changeDnsIp(accessToken *TokenSource, domainName string) error {
 		return nil
 	}
 
-	editRequest := godo.DomainRecordEditRequest{Data: ownIp}
-	log.Printf("Updating record %v to new ip: %v\n", domainName, editRequest.Data)
-	_, _, err = client.Domains.EditRecord(context.Background(), domainName, ipRecord.ID, &editRequest)
+	log.Printf("Updating record %v to new ip: %v\n", domainName, ownIp)
+	_, _, err = client.Domains.EditRecord(
+		context.Background(),
+		domainName,
+		ipRecord.ID,
+		&godo.DomainRecordEditRequest{Data: ownIp},
+	)
 	if err != nil {
 		return err
 	}
